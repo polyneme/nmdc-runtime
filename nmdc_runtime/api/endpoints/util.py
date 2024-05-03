@@ -58,6 +58,9 @@ from toolz import assoc_in, concat, dissoc, get_in, merge
 BASE_URL_INTERNAL = os.getenv("API_HOST")
 BASE_URL_EXTERNAL = os.getenv("API_HOST_EXTERNAL")
 HOSTNAME_EXTERNAL = BASE_URL_EXTERNAL.split("://", 1)[-1]
+FUSEKI_HOST = os.getenv("FUSEKI_HOST")
+FUSEKI_USER = os.getenv("FUSEKI_USER")
+FUSEKI_PASSWD = os.getenv("FUSEKI_PASSWD")
 
 
 def check_filter(filter_: str):

@@ -1,0 +1,58 @@
+@prefix afn: <http://jena.apache.org/ARQ/function#> .
+@prefix fuseki: <http://jena.apache.org/fuseki#> .
+@prefix ja: <http://jena.hpl.hp.com/2005/11/Assembler#> .
+@prefix nmdc: <https://w3id.org/nmdc/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix tdb: <http://jena.hpl.hp.com/2008/tdb#> .
+@prefix xs: <http://www.w3.org/2001/XMLSchema#> .
+
+<https://api.microbiomedata.org/fuseki/#baseModel>
+	a tdb:GraphTDB ;
+	tdb:dataset <https://api.microbiomedata.org/fuseki/#tdbDataset> ;
+	.
+
+<https://api.microbiomedata.org/fuseki/#dataset>
+	a ja:RDFDataset ;
+	ja:defaultGraph <https://api.microbiomedata.org/fuseki/#inferenceModel> ;
+	.
+
+<https://api.microbiomedata.org/fuseki/#inferenceModel>
+	a ja:InfModel ;
+	ja:baseModel <https://api.microbiomedata.org/fuseki/#baseModel> ;
+	ja:reasoner [
+		ja:reasonerURL <http://jena.hpl.hp.com/2003/TransitiveReasoner> ;
+	] ;
+	.
+
+<https://api.microbiomedata.org/fuseki/#nmdc>
+	a fuseki:Service ;
+	fuseki:dataset <https://api.microbiomedata.org/fuseki/#dataset> ;
+	fuseki:name "nmdc" ;
+	fuseki:serviceQuery
+		"query" ,
+		"sparql"
+		;
+	fuseki:serviceReadWriteGraphStore "data" ;
+	fuseki:serviceUpdate "update" ;
+	fuseki:serviceUpload "upload" ;
+	.
+
+<https://api.microbiomedata.org/fuseki/#tdbDataset>
+	a tdb:DatasetTDB ;
+	ja:context [
+		rdfs:comment "Query timeout on this dataset: 10s." ;
+		ja:cxtName "arq:queryTimeout" ;
+		ja:cxtValue "10000" ;
+	] ;
+	tdb:location "/fuseki-base/nmdc-db.tdb" ;
+	.
+
+[]
+	a fuseki:Server ;
+	fuseki:services (
+		<https://api.microbiomedata.org/fuseki/#nmdc>
+	) ;
+	.
+

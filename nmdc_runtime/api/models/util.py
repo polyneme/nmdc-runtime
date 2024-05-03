@@ -1,8 +1,9 @@
+from enum import Enum
 from typing import TypeVar, List, Optional, Generic, Annotated
 
 from fastapi import Query
 
-from pydantic import model_validator, Field, BaseModel
+from pydantic import model_validator, Field, BaseModel, NonNegativeInt
 from typing_extensions import Annotated
 
 ResultT = TypeVar("ResultT")
@@ -37,6 +38,20 @@ class ListRequest(BaseModel):
 
 
 PerPageRange = Annotated[int, Field(gt=0, le=2_000)]
+
+
+class AssociationDirectionEnum(str, Enum):
+    upstream = "upstream"
+    downstream = "downstream"
+
+
+class AssociationsRequest(BaseModel):
+    start_type: str
+    start_id: str
+    target_type: str
+    target_filter: Optional[str] = None
+    target_projection: Optional[str] = None
+    limit: NonNegativeInt = 5
 
 
 class FindRequest(BaseModel):

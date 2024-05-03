@@ -88,20 +88,17 @@ services:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: root
 
-  terminus:
-    image: terminusdb/terminusdb-server:v11.0.6
-    container_name: terminus
+  fuseki:
+    container_name: fuseki
+    build:
+      dockerfile: nmdc_runtime/fuseki.Dockerfile
+      context: .
     ports:
-      - "6364:6363"
-    tty: true
+      - "3030:3030"
     volumes:
-      - nmdc_runtime_terminus_data:/app/terminusdb/storage
-    restart: unless-stopped
-    environment:
-      TERMINUSDB_SERVER_PORT: 6363
-      TERMINUSDB_ADMIN_PASS: root
-      TERMINUSDB_AUTOLOGIN_ENABLED: "true"
-      TERMINUSDB_HTTPS_ENABLED: "false"
+      - ./nmdc_runtime/site/fuseki/fuseki-config.ttl:/configuration/fuseki-config.ttl
+      - ./nmdc_runtime/site/fuseki/shiro.ini:/fuseki/run/shiro.ini
+      - nmdc_runtime_fuseki_data:/fuseki-base
 
 volumes:
   nmdc_runtime_postgres_data:
@@ -109,6 +106,8 @@ volumes:
   nmdc_runtime_mongo_data:
     driver: local
   nmdc_runtime_terminus_data:
+    driver: local
+  nmdc_runtime_fuseki_data:
     driver: local
 
 secrets:
