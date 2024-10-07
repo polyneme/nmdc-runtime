@@ -135,39 +135,33 @@ def get_nmdc_schema_associations(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f'start_id "{req.start_id}" not found.',
         )
+    # values_stmt = f"VALUES ?start_node {{ {start_node['id']} }}"
+    # start_pattern = f"?start_node nmdc:type nmdc:{req.start_type} ."
+    # target_pattern = f"?o nmdc:type nmdc:{req.target_type} ."
+   """
+   TODO: refactor "depends_on" logic for mongo queries on alldocs collection
+   """
 
-    values_stmt = f"VALUES ?start_node {{ {start_node['id']} }}"
-    start_pattern = f"?start_node nmdc:type nmdc:{req.start_type} ."
-    target_pattern = f"?o nmdc:type nmdc:{req.target_type} ."
-    objects_that_can_reach_start_node_pattern = "?o nmdc:depends_on+ ?start_node ."
-    objects_reachable_from_start_node_pattern = "?start_node nmdc:depends_on+ ?o ."
-    where_clause = f"""
-        {values_stmt} {start_pattern} {target_pattern}
-        {{
-          {{ {objects_that_can_reach_start_node_pattern} }}
-          UNION
-          {{ {objects_reachable_from_start_node_pattern} }}
-        }}
-    """
-    limit = f"LIMIT {req.limit}" if req.limit != 0 else ""
-    query = f"""
-    PREFIX nmdc: <https://w3id.org/nmdc/>
-    SELECT DISTINCT ?o WHERE {{ 
-        {where_clause}
-    }} {limit}"""
-    print(query)
+    # objects_that_can_reach_start_node_pattern = "?o nmdc:depends_on+ ?start_node ."
+    # objects_reachable_from_start_node_pattern = "?start_node nmdc:depends_on+ ?o ."
+    # where_clause = f"""
+    #     {values_stmt} {start_pattern} {target_pattern}
+    #     {{
+    #       {{ {objects_that_can_reach_start_node_pattern} }}
+    #       UNION
+    #       {{ {objects_reachable_from_start_node_pattern} }}
+    #     }}
+    # """
+    # limit = f"LIMIT {req.limit}" if req.limit != 0 else ""
+    # query = f"""
+    # PREFIX nmdc: <https://w3id.org/nmdc/>
+    # SELECT DISTINCT ?o WHERE {{
+    #     {where_clause}
+    # }} {limit}"""
+    # print(query)
 
-    sparql = SPARQLWrapper(f"{FUSEKI_HOST}/nmdc")
-    sparql.user = FUSEKI_USER
-    sparql.passwd = FUSEKI_PASSWD
-    sparql.setReturnFormat(SPARQL_JSON)
-    sparql.setQuery(query)
     try:
-        ret = sparql.queryAndConvert()
-        target_ids = [
-            b["o"]["value"].replace("https://w3id.org/nmdc/", "nmdc:")
-            for b in ret["results"]["bindings"]
-        ]
+        # ret = mongo_query_result
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
