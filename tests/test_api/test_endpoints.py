@@ -12,7 +12,11 @@ from toolz import get_in
 from nmdc_runtime.api.core.auth import get_password_hash
 from nmdc_runtime.api.core.metadata import df_from_sheet_in, _validate_changesheet
 from nmdc_runtime.api.core.util import generate_secret, dotted_path_for
-from nmdc_runtime.api.db.mongo import get_mongo_db
+from nmdc_runtime.api.db.mongo import (
+    get_mongo_db,
+    get_collection_names_from_schema,
+    mongorestore_collection,
+)
 from nmdc_runtime.api.endpoints.util import persist_content_and_get_drs_object
 from nmdc_runtime.api.models.job import Job, JobOperationMetadata
 from nmdc_runtime.api.models.metadata import ChangesheetIn
@@ -27,6 +31,48 @@ from nmdc_runtime.site.resources import (
     RuntimeApiUserClient,
 )
 from nmdc_runtime.util import REPO_ROOT_DIR, ensure_unique_id_indexes, validate_json
+from tests.test_util import download_to
+
+
+MONGODUMP_URL_PREFIX = os.getenv("MONGO_REMOTE_DUMP_URL_PREFIX")
+# extract the specific dump directory name, e.g. 'dump_nmdc-prod_2025-02-12_20-12-02'.
+MONGODUMP_DIRNAME = MONGODUMP_URL_PREFIX.rsplit("/", maxsplit=1)[-1]
+MONGODUMP_DIR = REPO_ROOT_DIR / "tests" / "nmdcdb" / MONGODUMP_DIRNAME
+MONGODUMP_DIR.mkdir(parents=True, exist_ok=True)
+
+# certain schema collections are not expected for tests
+SCHEMA_COLLECTIONS_EXCLUDED = {
+    "functional_annotation_agg",
+    "functional_annotation_set",
+    "genome_feature_set",
+}
+
+
+def ensure_schema_collections_local_filesystem_cache():
+    # download collections into "nmdc" db namespace
+    db_dir = MONGODUMP_DIR / "nmdc"
+    db_dir.mkdir(exist_ok=True)
+    for name in get_collection_names_from_schema():
+        if name in SCHEMA_COLLECTIONS_EXCLUDED:
+            continue
+        url = f"{MONGODUMP_URL_PREFIX}/nmdc/{name}.bson.gz"
+        target_path = db_dir / (name + ".bson.gz")
+        # TODO use sha256 hashes or at least file sizes to ensure fidelity of existing files.
+        #   Can use HEAD request on `url`?
+        if not db_dir.joinpath(name + ".bson.gz").exists():
+            download_to(url, target_path)
+
+
+def ensure_schema_collections_loaded():
+    ensure_schema_collections_local_filesystem_cache()
+    mdb = get_mongo_db()
+    for name in get_collection_names_from_schema():
+        if name in SCHEMA_COLLECTIONS_EXCLUDED:
+            continue
+        if not mdb.get_collection(name).estimated_document_count() > 0:
+            filepath = MONGODUMP_DIR / "nmdc" / (name + ".bson.gz")
+            print(f"ensure_schema_collections_loaded: restoring {name}")
+            mongorestore_collection(mdb, name, filepath)
 
 
 def ensure_schema_collections_and_alldocs(force_refresh_of_alldocs: bool = False):
@@ -38,6 +84,7 @@ def ensure_schema_collections_and_alldocs(force_refresh_of_alldocs: bool = False
                                           will only refresh the "alldocs" collection if it is empty.
     """
     mdb = get_mongo_db()
+    ensure_schema_collections_loaded()
     ensure_unique_id_indexes(mdb)
     # Return if `alldocs` collection has already been materialized, and caller does not want to force a refresh of it.
     if mdb.alldocs.estimated_document_count() > 0 and not force_refresh_of_alldocs:
@@ -690,7 +737,7 @@ def test_find_planned_process_by_id(api_site_client):
         )
 
 
-def test_run_query_find_user(api_user_client):
+def _test_run_query_find_as(client):
     mdb = get_mongo_db()
     if not mdb.biosample_set.find_one({"id": "nmdc:bsm-12-7mysck21"}):
         mdb.biosample_set.insert_one(
@@ -702,7 +749,7 @@ def test_run_query_find_user(api_user_client):
         )
 
     # Make sure user client works
-    response = api_user_client.request(
+    response = client.request(
         "POST",
         "/queries:run",
         {"find": "biosample_set", "filter": {"id": "nmdc:bsm-12-7mysck21"}},
@@ -711,28 +758,19 @@ def test_run_query_find_user(api_user_client):
     assert "cursor" in response.json()
 
 
-def test_run_query_find_site(api_site_client):
-    mdb = get_mongo_db()
-    if not mdb.biosample_set.find_one({"id": "nmdc:bsm-12-7mysck21"}):
-        mdb.biosample_set.insert_one(
-            json.loads(
-                (
-                    REPO_ROOT_DIR / "tests" / "files" / "nmdc_bsm-12-7mysck21.json"
-                ).read_text()
-            )
-        )
+def test_run_query_find_as_user(api_user_client):
+    _test_run_query_find_as(api_user_client)
 
-    # Make sure site client works
-    response = api_site_client.request(
-        "POST",
-        "/queries:run",
-        {"find": "biosample_set", "filter": {"id": "nmdc:bsm-12-7mysck21"}},
+
+def test_run_query_find_as_site(api_site_client):
+    _test_run_query_find_as(api_site_client)
+
+
+def _test_run_query_delete_as(client):
+    client_id_attribute = (
+        "username" if isinstance(client, RuntimeApiUserClient) else "client_id"
     )
-    assert response.status_code == 200
-    assert "cursor" in response.json()
 
-
-def test_run_query_delete(api_user_client):
     mdb = get_mongo_db()
     biosample_id = "nmdc:bsm-12-deleteme"
 
@@ -742,12 +780,12 @@ def test_run_query_delete(api_user_client):
     # Access should not work without permissions
     mdb["_runtime"].api.allow.delete_many(
         {
-            "username": api_user_client.username,
+            "username": getattr(client, client_id_attribute),
             "action": "/queries:run(query_cmd:DeleteCommand)",
         }
     )
     with pytest.raises(requests.exceptions.HTTPError) as excinfo:
-        response = api_user_client.request(
+        response = client.request(
             "POST",
             "/queries:run",
             {
@@ -760,12 +798,12 @@ def test_run_query_delete(api_user_client):
     # Add persmissions to DB
     mdb["_runtime"].api.allow.insert_one(
         {
-            "username": api_user_client.username,
+            "username": getattr(client, client_id_attribute),
             "action": "/queries:run(query_cmd:DeleteCommand)",
         }
     )
     try:
-        response = api_user_client.request(
+        response = client.request(
             "POST",
             "/queries:run",
             {
@@ -776,51 +814,20 @@ def test_run_query_delete(api_user_client):
         assert response.status_code == 200
         assert response.json()["n"] == 1
     finally:
-        mdb["_runtime"].api.allow.delete_one({"username": api_user_client.username})
-
-
-def test_run_query_delete_site(api_site_client):
-    mdb = get_mongo_db()
-    biosample_id = "nmdc:bsm-12-deleteme"
-
-    if not mdb.biosample_set.find_one({"id": biosample_id}):
-        mdb.biosample_set.insert_one({"id": biosample_id})
-
-    # Access should not work without permissions
-    with pytest.raises(requests.exceptions.HTTPError) as excinfo:
-        response = api_site_client.request(
-            "POST",
-            "/queries:run",
-            {
-                "delete": "biosample_set",
-                "deletes": [{"q": {"id": biosample_id}, "limit": 1}],
-            },
+        mdb["_runtime"].api.allow.delete_one(
+            {"username": getattr(client, client_id_attribute)}
         )
-    assert excinfo.value.response.status_code == 403
-
-    # Add persmissions to DB
-    mdb["_runtime"].api.allow.insert_one(
-        {
-            "username": api_site_client.client_id,
-            "action": "/queries:run(query_cmd:DeleteCommand)",
-        }
-    )
-    try:
-        response = api_site_client.request(
-            "POST",
-            "/queries:run",
-            {
-                "delete": "biosample_set",
-                "deletes": [{"q": {"id": biosample_id}, "limit": 1}],
-            },
-        )
-        assert response.status_code == 200
-        assert response.json()["n"] == 1
-    finally:
-        mdb["_runtime"].api.allow.delete_one({"username": api_site_client.client_id})
 
 
-def test_run_query_update(api_user_client):
+def test_run_query_delete_as_user(api_user_client):
+    _test_run_query_delete_as(api_user_client)
+
+
+def test_run_query_delete_as_site(api_site_client):
+    _test_run_query_delete_as(api_site_client)
+
+
+def test_run_query_update_as_user(api_user_client):
     """Submit a request to store data that does not comply with the schema."""
     mdb = get_mongo_db()
     allow_spec = {
@@ -842,3 +849,15 @@ def test_run_query_update(api_user_client):
                 ],
             },
         )
+
+
+def test_run_query_find_with_continuation(api_user_client):
+    response = api_user_client.request(
+        "POST",
+        "/queries:run",
+        {"find": "data_object_set", "filter": {}},
+    )
+    assert response.status_code == 200
+    assert "cursor" in response.json()
+    cursor = response.json()["cursor"]
+    assert cursor["id"] != "0"  # i.e., there is another batch to fetch

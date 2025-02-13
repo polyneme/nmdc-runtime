@@ -136,6 +136,19 @@ def test_multiple_errors():
     print(validation_errors)
 
 
+def download_to(url, path):
+    response = requests.get(url, stream=True)
+    if response.status_code == 200:
+        with open(path, "wb") as file:
+            chunk_size = 8192
+            print(f"Downloading file using stream {chunk_size=}")
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                file.write(chunk)
+        print(f"Downloaded {url} to {path}")
+    else:
+        print(f"Failed to download {url}. Status code: {response.status_code}")
+
+
 def download_and_extract_tar(url, extract_to="."):
     # Download the file
     response = requests.get(url, stream=True)

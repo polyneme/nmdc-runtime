@@ -146,8 +146,10 @@ def mongorestore_collection(mdb, collection_name, bson_file_path):
             mdb.drop_collection(collection_name)
             mdb[collection_name].insert_many(data)
             print(
-                f"mongorestore_collection: {len(data)} documents into {collection_name} after drop"
+                f"mongorestore_collection: inserted {len(data)} documents into {collection_name} after drop"
             )
+        else:
+            print(f"mongorestore_collection: no {collection_name} documents found")
 
 
 def mongorestore_from_dir(mdb, dump_directory, skip_collections=None):
