@@ -1100,7 +1100,12 @@ def materialize_alldocs(context) -> int:
         write_operations = []
         documents_processed_counter = 0
         for doc in mdb[coll_name].find():
-            doc_type = doc["type"][5:]  # lop off "nmdc:" prefix
+            try:
+                doc_type = doc["type"][5:]  # lop off "nmdc:" prefix
+            except KeyError:
+                raise Exception(
+                    f"doc {doc['id']} in collection {coll_name} has no 'type'!"
+                )
             slots_to_include = ["id", "type"] + document_reference_ranged_slots[
                 doc_type
             ]

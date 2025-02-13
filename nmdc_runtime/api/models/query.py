@@ -243,9 +243,6 @@ class Query(BaseModel):
     def from_cmd(cls, cmd: QueryCmd) -> "Query":
         return Query(cmd=cmd, id=generate_one_id(_mdb, "qy"))
 
-    def save(self):
-        _mdb.queries.update_one(self.model_dump(), upsert=True)
-
 
 class QueryRun(BaseModel):
     qid: str
