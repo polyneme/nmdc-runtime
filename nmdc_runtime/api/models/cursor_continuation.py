@@ -30,31 +30,21 @@ from nmdc_runtime.api.models.query import (
     GetMoreCommandResponse,
     InitialCommandResponseCursor,
     GetMoreCommandResponseCursor,
+    QueryRun,
+    Query,
+    CursorCommand,
+    CursorResponse,
 )
 from nmdc_runtime.api.models.user import User
 
 _mdb: MongoDatabase = get_mongo_db()
 
-# Ensure on-hour TTL on `_runtime.cursor_continuations` documents via TTL Index.
+# Ensure one-hour TTL on `_runtime.cursor_continuations` documents via TTL Index.
 _mdb["_runtime.cursor_continuations"].create_index(
     {"last_modified": 1}, expireAfterSeconds=3600
 )
 
 _coll_cc = _mdb["_runtime.cursor_continuations"]
-
-CursorCommand = Union[
-    AggregateCommand,
-    FindCommand,
-    GetMoreCommand,
-]
-
-CursorResponse = Union[
-    AggregateCommandResponse,
-    FindCommandResponse,
-    GetMoreCommandResponse,
-]
-
-_HistoryItem = CursorCommand | CursorResponse
 
 
 class CursorContinuation(BaseModel):
@@ -63,10 +53,10 @@ class CursorContinuation(BaseModel):
     This model is intended to correspond to a logical user "session" over several HTTP requests, and may be discarded
     after a user has retrieved all "batches" of documents. Thus, a collection of cursor continuations may be
     reasonably given e.g. a so-called "TTL Index" for the `last_modified` field in MongoDB, assuming that
-    `last_modified` is updated each time `history` is extended.
+    `last_modified` is updated each time `query_runs` is extended.
     """
 
-    history: List[_HistoryItem]
+    query_runs: List[QueryRun]
     id: str = Field(..., alias="_id")
     user: User
     last_modified: datetime.datetime
@@ -78,16 +68,17 @@ def _dump(m: BaseModel):
 
 def create_cc(cursor_command: dict, user: dict):
     if "find" in cursor_command:
-        history_item = FindCommand(**cursor_command)
+        query_cmd = FindCommand(**cursor_command)
     elif "aggregate" in cursor_command:
-        history_item = AggregateCommand(**cursor_command)
+        query_cmd = AggregateCommand(**cursor_command)
     elif "getMore" in cursor_command:
-        history_item = GetMoreCommand(**cursor_command)
+        query_cmd = GetMoreCommand(**cursor_command)
     else:
         raise ValueError("Unknown cursor command")
 
+    query = Query.from_cmd(query_cmd)
     cc = CursorContinuation(
-        history=[history_item],
+        history=[query_cmd],
         _id=generate_one_id(_mdb, "cursor_continuations"),
         user=User(**user),
         last_modified=now(),

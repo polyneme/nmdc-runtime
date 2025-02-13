@@ -92,14 +92,7 @@ def run_query(
     if isinstance(query_cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
 
-    qid = generate_one_id(mdb, "qy")
-    saved_at = now()
-    query = Query(
-        cmd=query_cmd,
-        id=qid,
-        saved_at=saved_at,
-    )
-    mdb.queries.insert_one(query.model_dump(exclude_unset=True))
+    query = Query.from_cmd(query_cmd).save()
     cmd_response = _run_query(query, mdb)
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 

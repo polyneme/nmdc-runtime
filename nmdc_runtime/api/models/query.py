@@ -11,8 +11,13 @@ from pydantic import (
     field_validator,
     ConfigDict,
 )
+from pymongo.database import Database as MongoDatabase
 from toolz import assoc
 from typing_extensions import Annotated
+
+from nmdc_runtime.api.core.idgen import generate_one_id
+from nmdc_runtime.api.core.util import now
+from nmdc_runtime.api.db.mongo import get_mongo_db
 
 Document = Dict[str, Any]
 
@@ -201,6 +206,18 @@ QueryResponseOptions = Union[
     AggregateCommandResponse,
 ]
 
+CursorCommand = Union[
+    AggregateCommand,
+    FindCommand,
+    GetMoreCommand,
+]
+
+CursorResponse = Union[
+    AggregateCommandResponse,
+    FindCommandResponse,
+    GetMoreCommandResponse,
+]
+
 
 def command_response_for(type_):
     d = {
@@ -215,10 +232,19 @@ def command_response_for(type_):
     return d.get(type_)
 
 
+_mdb = get_mongo_db()
+
+
 class Query(BaseModel):
     id: str
-    saved_at: datetime.datetime
     cmd: QueryCmd
+
+    @classmethod
+    def from_cmd(cls, cmd: QueryCmd) -> "Query":
+        return Query(cmd=cmd, id=generate_one_id(_mdb, "qy"))
+
+    def save(self):
+        _mdb.queries.update_one(self.model_dump(), upsert=True)
 
 
 class QueryRun(BaseModel):
