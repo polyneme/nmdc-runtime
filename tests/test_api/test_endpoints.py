@@ -493,7 +493,7 @@ def test_find_data_objects_for_nonexistent_study(api_site_client):
     with pytest.raises(requests.exceptions.HTTPError):
         api_site_client.request(
             "GET",
-            "/data_objects/study/nmdc:sty-11-hdd4bf83",
+            "/data_objects/study/nmdc:sty-11-fake",
         )
 
 

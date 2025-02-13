@@ -64,7 +64,7 @@ def test_changesheet_update_slot_with_range_decimal():
     mdb = get_mongo_db()
     bsm_local_id = "bsm-11-0pyv7738"
     remove_tmp_doc = False
-    if mdb.data_object_set.find_one({"id": "nmdc:" + bsm_local_id}) is None:
+    if mdb.biosample_set.find_one({"id": "nmdc:" + bsm_local_id}) is None:
         with open(
             REPO_ROOT_DIR.joinpath("tests", "files", f"nmdc_{bsm_local_id}.json")
         ) as f:
@@ -203,6 +203,7 @@ def test_changesheet_array_item_nested_attributes():
 def test_update_pi_websites():
     mdb = get_mongo(run_config_frozen__normal_env).db
     local_id = "sty-11-r2h77870"
+    restore_original_doc = False
     remove_tmp_doc = False
     if mdb.study_set.find_one({"id": "nmdc:" + local_id}) is None:
         with open(
@@ -212,6 +213,8 @@ def test_update_pi_websites():
         ) as f:
             mdb.study_set.insert_one(json.load(f))
             remove_tmp_doc = True
+    else:
+        restore_original_doc = True
     df = load_changesheet(
         TEST_DATA_DIR.joinpath("changesheet-update-pi-websites.tsv"), mdb
     )
@@ -234,10 +237,13 @@ def test_update_pi_websites():
         update_cmd, mdb_from=mdb, mdb_to=mdb_scratch, drop_mdb_to=True
     )
     results = update_mongo_db(mdb_scratch, update_cmd)
-    first_result = results[0]
-    assert first_result["doc_after"]["principal_investigator"] == pi_info
+    first_result_pi_info = results[0]["doc_after"]["principal_investigator"]
+    for k, v in pi_info.items():
+        assert first_result_pi_info[k] == v
     if remove_tmp_doc:
         mdb.study_set.delete_one({"id": "nmdc:" + local_id})
+    if restore_original_doc:
+        mdb.study_set.replace_one({"id": id_}, study_doc)
 
 
 def test_update_biosample_ph():
