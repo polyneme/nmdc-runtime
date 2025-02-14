@@ -249,14 +249,4 @@ class Query(BaseModel):
 class QueryRun(BaseModel):
     qid: str
     ran_at: datetime.datetime
-    result: Optional[Any] = None
-    error: Optional[Any] = None
-
-    @model_validator(mode="before")
-    def result_xor_error(cls, values):
-        result, error = values.get("result"), values.get("error")
-        if result is None and error is None:
-            raise ValueError("At least one of result and error must be provided.")
-        if result is not None and error is not None:
-            raise ValueError("Only one of result or error must be provided.")
-        return values
+    result: Any

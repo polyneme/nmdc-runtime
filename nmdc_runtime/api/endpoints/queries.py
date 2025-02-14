@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, status, HTTPException
 from pymongo.database import Database as MongoDatabase
 
 from nmdc_runtime.api.core.idgen import generate_one_id
-from nmdc_runtime.api.core.util import now, raise404_if_none
+from nmdc_runtime.api.core.util import now, raise404_if_none, pick
 from nmdc_runtime.api.db.mongo import (
     get_mongo_db,
     get_nonempty_nmdc_schema_collection_names,
@@ -119,7 +119,9 @@ def rerun_query(
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 
 
-@router.get("/queries/{query_id}", response_model=Query)
+@router.get(
+    "/queries/{query_id}", response_model=Query, response_model_exclude_unset=True
+)
 def get_query(
     query_id: str,
     mdb: MongoDatabase = Depends(get_mongo_db),
@@ -218,10 +220,10 @@ def _run_query(query, mdb) -> CommandResponse:
         query.cmd.allowDiskUse = True
     elif q_type is FindCommand:
         # Append (`dict`s are ordered) to sort spec, creating it if necessary.
-        if query.sort is None:
-            query.sort = {"_id": 1}
+        if query.cmd.sort is None:
+            query.cmd.sort = {"_id": 1}
         else:
-            query.sort.update({"_id": 1})
+            query.cmd.sort.update({"_id": 1})
     elif q_type is GetMoreCommand:
         # Fetch cursor continuation for query, construct "getMore" equivalent, and assign `query` to that equivalent.
         cursor_continuation = cc.get_cc_by_id(query.getMore)
@@ -229,12 +231,17 @@ def _run_query(query, mdb) -> CommandResponse:
         # TODO assign `query` to that equivalent.
 
     # Persist the query for reference and reuse.
-    mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
+    if mdb.queries.find_one({"id": query.id}) is None:
+        mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
 
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
     q_response = mdb.command(query.cmd.model_dump(exclude_unset=True))
     q_response["query_id"] = query.id
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
+
+    # Not okay? Early return.
+    if not cmd_response.ok:
+        return cmd_response
 
     if q_type in (DeleteCommand, UpdateCommand):
         # TODO `_request_dagster_run` of `ensure_alldocs`?
@@ -248,26 +255,23 @@ def _run_query(query, mdb) -> CommandResponse:
                 ),
             )
 
-    r_type = type(cmd_response)
-    query_run = (
-        QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
-        if cmd_response.ok
-        else QueryRun(qid=query.id, ran_at=ran_at, error=cmd_response)
-    )
+    query_run = QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
 
     # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.
     cursor_continuation = None
-    if r_type is CursorResponse:
-        if q_type is GetMoreCommand:
-            pass  # TODO Append query run to current continuation
-        else:
-            cursor_continuation = cc.create_cc(query_run.model_dump(exclude_unset=True))
-    if r_type is AggregateCommandResponse:
-        pass  # TODO
-    elif q_type is FindCommandResponse:
-        pass  # TODO
+    if q_type is AggregateCommand:
+        # TODO
+        cursor_continuation = cc.create_cc(query_run.model_dump(exclude_unset=True))
+    elif q_type is FindCommand:
+        # TODO is `QueryRun` necessary? `CommandResponse` has `query_id` -- why not `ran_at` too?
+        query_run_doc_slim = query_run.model_dump(exclude_unset=True)
+        query_run_doc_slim["cursor"]["firstBatch"] = [
+            pick(["_id"], batch_doc)
+            for batch_doc in query_run_doc_slim["cursor"]["firstBatch"]
+        ]
+        cursor_continuation = cc.create_cc(query_run_doc_slim)
     elif q_type is GetMoreCommandResponse:
-        pass  # TODO
-
+        # TODO Append query run to current continuation
+        pass
     mdb.query_runs.insert_one(query_run.model_dump(exclude_unset=True))
     return cmd_response
