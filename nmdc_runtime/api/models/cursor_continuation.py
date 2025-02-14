@@ -35,7 +35,6 @@ from nmdc_runtime.api.models.query import (
     CursorCommand,
     CursorResponse,
 )
-from nmdc_runtime.api.models.user import User
 
 _mdb: MongoDatabase = get_mongo_db()
 
@@ -48,42 +47,31 @@ _coll_cc = _mdb["_runtime.cursor_continuations"]
 
 
 class CursorContinuation(BaseModel):
-    """Represents a sequence of command, response, command, response, etc. associated with a user.
+    """Represents a sequence of query runs that "page" through a source query's results.
 
-    This model is intended to correspond to a logical user "session" over several HTTP requests, and may be discarded
-    after a user has retrieved all "batches" of documents. Thus, a collection of cursor continuations may be
-    reasonably given e.g. a so-called "TTL Index" for the `last_modified` field in MongoDB, assuming that
-    `last_modified` is updated each time `query_runs` is extended.
+    This model is intended to correspond to a logical "session" of query runs to "page" through a query
+    over several HTTP requests, and may be discarded after fetching all "batches" of documents.
+
+    Thus, a mongo collection tracking cursor continuations may be reasonably given e.g. a so-called "TTL Index"
+    for the `last_modified` field, assuming that `last_modified` is updated each time `query_runs` is extended.
     """
 
     query_runs: List[QueryRun]
     id: str = Field(..., alias="_id")
-    user: User
     last_modified: datetime.datetime
 
 
-def _dump(m: BaseModel):
+def dump_cc(m: BaseModel):
     return m.model_dump(by_alias=True, exclude_unset=True)
 
 
-def create_cc(cursor_command: dict, user: dict):
-    if "find" in cursor_command:
-        query_cmd = FindCommand(**cursor_command)
-    elif "aggregate" in cursor_command:
-        query_cmd = AggregateCommand(**cursor_command)
-    elif "getMore" in cursor_command:
-        query_cmd = GetMoreCommand(**cursor_command)
-    else:
-        raise ValueError("Unknown cursor command")
-
-    query = Query.from_cmd(query_cmd)
+def create_cc(query_run: dict):
     cc = CursorContinuation(
-        history=[query_cmd],
+        query_runs=[query_run],
         _id=generate_one_id(_mdb, "cursor_continuations"),
-        user=User(**user),
         last_modified=now(),
     )
-    doc = _dump(cc)
+    doc = dump_cc(cc)
     _coll_cc.insert_one(doc)
     return doc
 
@@ -91,7 +79,7 @@ def create_cc(cursor_command: dict, user: dict):
 def get_cc_by_id(cc_id: str):
     doc = _coll_cc.find_one({"_id": cc_id})
     if doc is not None:
-        return _dump(CursorContinuation(**doc))
+        return dump_cc(CursorContinuation(**doc))
 
 
 def get_more_with_cursor_continuation(cc_id: str):

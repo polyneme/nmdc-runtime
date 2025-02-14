@@ -15,6 +15,7 @@ from nmdc_runtime.api.endpoints.util import (
     check_action_permitted,
     strip_oid,
 )
+import nmdc_runtime.api.models.cursor_continuation as cc
 from nmdc_runtime.api.models.query import (
     Query,
     QueryResponseOptions,
@@ -100,9 +101,6 @@ def run_query(
     query = Query.from_cmd(query_cmd)
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
-
-    mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
-
     cmd_response = _run_query(query, mdb)
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 
@@ -117,7 +115,6 @@ def rerun_query(
     query = Query(**raise404_if_none(mdb.queries.find_one({"id": query_id})))
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
-
     cmd_response = _run_query(query, mdb)
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 
@@ -216,30 +213,29 @@ def _run_query(query, mdb) -> CommandResponse:
                     detail="Failed to back up to-be-updated documents. operation aborted.",
                 )
     elif q_type is AggregateCommand:
-        pass
+        # Append $sort stage to pipeline and allow disk use.
+        query.cmd.pipeline.append({"$sort": {"_id": 1}})
+        query.cmd.allowDiskUse = True
     elif q_type is FindCommand:
-        pass
+        # Append (`dict`s are ordered) to sort spec, creating it if necessary.
+        if query.sort is None:
+            query.sort = {"_id": 1}
+        else:
+            query.sort.update({"_id": 1})
     elif q_type is GetMoreCommand:
-        pass
+        # Fetch cursor continuation for query, construct "getMore" equivalent, and assign `query` to that equivalent.
+        cursor_continuation = cc.get_cc_by_id(query.getMore)
+        # TODO construct "getMore" equivalent of originating "find" or "aggregate" query.
+        # TODO assign `query` to that equivalent.
+
+    # Persist the query for reference and reuse.
+    mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
 
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
     q_response = mdb.command(query.cmd.model_dump(exclude_unset=True))
     q_response["query_id"] = query.id
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
 
-    # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.
-    if q_type is AggregateCommandResponse:
-        pass
-    elif q_type is FindCommandResponse:
-        pass
-    elif q_type is GetMoreCommandResponse:
-        pass
-
-    query_run = (
-        QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
-        if cmd_response.ok
-        else QueryRun(qid=query.id, ran_at=ran_at, error=cmd_response)
-    )
     if q_type in (DeleteCommand, UpdateCommand):
         # TODO `_request_dagster_run` of `ensure_alldocs`?
         if cmd_response.n == 0:
@@ -251,5 +247,27 @@ def _run_query(query, mdb) -> CommandResponse:
                     " But what do I know? I'm just a teapot.",
                 ),
             )
+
+    r_type = type(cmd_response)
+    query_run = (
+        QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
+        if cmd_response.ok
+        else QueryRun(qid=query.id, ran_at=ran_at, error=cmd_response)
+    )
+
+    # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.
+    cursor_continuation = None
+    if r_type is CursorResponse:
+        if q_type is GetMoreCommand:
+            pass  # TODO Append query run to current continuation
+        else:
+            cursor_continuation = cc.create_cc(query_run.model_dump(exclude_unset=True))
+    if r_type is AggregateCommandResponse:
+        pass  # TODO
+    elif q_type is FindCommandResponse:
+        pass  # TODO
+    elif q_type is GetMoreCommandResponse:
+        pass  # TODO
+
     mdb.query_runs.insert_one(query_run.model_dump(exclude_unset=True))
     return cmd_response

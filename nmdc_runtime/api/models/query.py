@@ -54,6 +54,7 @@ class FindCommand(CommandBase):
 class AggregateCommand(CommandBase):
     aggregate: str
     pipeline: List[Document]
+    allowDiskUse: Optional[bool] = False
     cursor: Optional[Document] = None
 
     @field_validator("pipeline")
@@ -80,7 +81,7 @@ class AggregateCommand(CommandBase):
 
 class GetMoreCommand(CommandBase):
     # Note: No `collection` field. See `CursorContinuation` for inter-API-request "sessions" are modeled.
-    getMore: int
+    getMore: str  # Note: runtime uses a `str` id, not an `int` like mongo's native session cursors.
     batchSize: Optional[PositiveInt] = None
 
 
