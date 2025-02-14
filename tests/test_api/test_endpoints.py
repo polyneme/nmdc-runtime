@@ -865,7 +865,6 @@ def test_run_query_find_with_continuation(api_user_client):
     assert "cursor" in response.json()
     cursor = response.json()["cursor"]
     assert cursor["id"] != "0"  # i.e., there is another batch to fetch
-    assert False
 
 
 def test_run_query_aggregate_with_continuation(api_user_client):
