@@ -107,7 +107,7 @@ def run_query(
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 
 
-@router.post("/queries/{query_id}:run", response_model=Query)
+@router.post("/queries/{query_id}:run", response_model=QueryResponseOptions)
 def rerun_query(
     query_id: str,
     mdb: MongoDatabase = Depends(get_mongo_db),
@@ -224,6 +224,7 @@ def _run_query(query, mdb) -> CommandResponse:
 
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
     q_response = mdb.command(query.cmd.model_dump(exclude_unset=True))
+    q_response["query_id"] = query.id
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
 
     # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.

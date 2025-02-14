@@ -85,6 +85,7 @@ class GetMoreCommand(CommandBase):
 
 
 class CommandResponse(BaseModel):
+    query_id: str
     ok: OneOrZero
 
 
