@@ -24,6 +24,14 @@ from nmdc_runtime.api.models.query import (
     command_response_for,
     QueryCmd,
     UpdateCommand,
+    CursorCommand,
+    CursorResponse,
+    AggregateCommand,
+    FindCommand,
+    GetMoreCommand,
+    AggregateCommandResponse,
+    FindCommandResponse,
+    GetMoreCommandResponse,
 )
 from nmdc_runtime.api.models.user import get_current_active_user, User
 from nmdc_runtime.util import OverlayDB, validate_json
@@ -213,9 +221,25 @@ def _run_query(query, mdb) -> CommandResponse:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to back up to-be-updated documents. operation aborted.",
                 )
+    elif q_type is AggregateCommand:
+        pass
+    elif q_type is FindCommand:
+        pass
+    elif q_type is GetMoreCommand:
+        pass
 
+    # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
     q_response = mdb.command(query.cmd.model_dump(exclude_unset=True))
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
+
+    # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.
+    if q_type is AggregateCommandResponse:
+        pass
+    elif q_type is FindCommandResponse:
+        pass
+    elif q_type is GetMoreCommandResponse:
+        pass
+
     query_run = (
         QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
         if cmd_response.ok

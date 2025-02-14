@@ -852,10 +852,64 @@ def test_run_query_update_as_user(api_user_client):
 
 
 def test_run_query_find_with_continuation(api_user_client):
+    # Example taken from <https://github.com/microbiomedata/nmdc-runtime/issues/434#issue-2074885218>
     response = api_user_client.request(
         "POST",
         "/queries:run",
-        {"find": "data_object_set", "filter": {}},
+        {
+            "find": "data_generation_set",
+            "filter": {"associated_studies": "nmdc:sty-11-aygzgv51"},
+        },
+    )
+    assert response.status_code == 200
+    assert "cursor" in response.json()
+    cursor = response.json()["cursor"]
+    assert cursor["id"] != "0"  # i.e., there is another batch to fetch
+    assert False
+
+
+def test_run_query_aggregate_with_continuation(api_user_client):
+    # Example taken from <https://github.com/microbiomedata/nmdc-runtime/issues/434#issuecomment-2463238444>
+    response = api_user_client.request(
+        "POST",
+        "/queries:run",
+        {
+            "aggregate": "workflow_execution_set",
+            "pipeline": [
+                {"$match": {"type": "nmdc:MetagenomeAnnotation", "version": "v1.1.0"}},
+                {
+                    "$lookup": {
+                        "from": "data_generation_set",
+                        "localField": "was_informed_by",
+                        "foreignField": "id",
+                        "as": "data_generation_set",
+                    }
+                },
+                {
+                    "$match": {
+                        "data_generation_set.associated_studies": "nmdc:sty-11-34xj1150",
+                        "data_generation_set.processing_institution": "JGI",
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "data_object_set",
+                        "localField": "has_input",
+                        "foreignField": "id",
+                        "as": "do_input",
+                    }
+                },
+                {
+                    "$lookup": {
+                        "from": "data_object_set",
+                        "localField": "has_output",
+                        "foreignField": "id",
+                        "as": "do_output",
+                    }
+                },
+            ],
+            "allowDiskUse": True,
+        },
     )
     assert response.status_code == 200
     assert "cursor" in response.json()
