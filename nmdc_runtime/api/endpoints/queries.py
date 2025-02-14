@@ -97,11 +97,27 @@ def run_query(
     }
     ```
     """
-    if isinstance(query_cmd, (DeleteCommand, UpdateCommand)):
+    query = Query.from_cmd(query_cmd)
+    if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
 
-    query = Query.from_cmd(query_cmd)
     mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
+
+    cmd_response = _run_query(query, mdb)
+    return unmongo(cmd_response.model_dump(exclude_unset=True))
+
+
+@router.post("/queries/{query_id}:run", response_model=Query)
+def rerun_query(
+    query_id: str,
+    mdb: MongoDatabase = Depends(get_mongo_db),
+    user: User = Depends(get_current_active_user),
+):
+
+    query = Query(**raise404_if_none(mdb.queries.find_one({"id": query_id})))
+    if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
+        check_can_update_and_delete(user)
+
     cmd_response = _run_query(query, mdb)
     return unmongo(cmd_response.model_dump(exclude_unset=True))
 
@@ -112,21 +128,6 @@ def get_query(
     mdb: MongoDatabase = Depends(get_mongo_db),
 ):
     return raise404_if_none(mdb.queries.find_one({"id": query_id}))
-
-
-@router.post("/queries/{query_id}:run", response_model=Query)
-def rerun_query(
-    query_id: str,
-    mdb: MongoDatabase = Depends(get_mongo_db),
-    user: User = Depends(get_current_active_user),
-):
-    doc = raise404_if_none(mdb.queries.find_one({"id": query_id}))
-    query = Query(**doc)
-    if isinstance(query, DeleteCommand):
-        check_can_update_and_delete(user)
-
-    cmd_response = _run_query(query, mdb)
-    return unmongo(cmd_response.model_dump(exclude_unset=True))
 
 
 def _run_query(query, mdb) -> CommandResponse:
