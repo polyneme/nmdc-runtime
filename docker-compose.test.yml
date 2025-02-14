@@ -6,7 +6,7 @@ services:
   dagster-postgresql:
     image: postgres:11
     volumes:
-      - nmdc_runtime_test_postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: "postgres_user"
       POSTGRES_PASSWORD: "postgres_password"
@@ -73,7 +73,7 @@ services:
     ports:
       - "27018:27017"
     volumes:
-      - nmdc_runtime_test_mongo_data:/data/db
+      - mongo_data:/data/db
       - ./tests/nmdcdb:/nmdcdb_dump:ro
       - ./tests/mongorestore-nmdc-testdb.sh:/mongorestore-nmdc-testdb.sh:ro
     restart: unless-stopped
@@ -98,9 +98,9 @@ services:
       - .:/code
 
 volumes:
-  nmdc_runtime_test_postgres_data:
+  postgres_data:
     driver: local
-  nmdc_runtime_test_mongo_data:
+  mongo_data:
     driver: local
 
 name: nmdc-runtime-test
