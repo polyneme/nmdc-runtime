@@ -114,13 +114,6 @@ def get_query(
     return raise404_if_none(mdb.queries.find_one({"id": query_id}))
 
 
-@router.get("/queries", response_model=List[Query])
-def list_queries(
-    mdb: MongoDatabase = Depends(get_mongo_db),
-):
-    return list(mdb.queries.find())
-
-
 @router.post("/queries/{query_id}:run", response_model=Query)
 def rerun_query(
     query_id: str,
