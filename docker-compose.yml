@@ -80,7 +80,8 @@ services:
       - "27018:27017"
     volumes:
       - nmdc_runtime_mongo_data:/data/db
-      - ./tests:/app_tests
+      - ./tests/nmdcdb:/nmdcdb_dump:ro
+      - ./tests/mongorestore-nmdc-testdb.sh:/mongorestore-nmdc-testdb.sh:ro
     restart: unless-stopped
     environment:
       MONGO_INITDB_ROOT_USERNAME: admin

@@ -79,7 +79,7 @@ services:
       - "27018:27017"
     volumes:
       - nmdc_runtime_test_mongo_data:/data/db
-      - ~/nmdcdb-mongodump:/nmdc_dump:ro
+      - ./tests/nmdcdb:/nmdcdb_dump:ro
       - ./tests/mongorestore-nmdc-testdb.sh:/mongorestore-nmdc-testdb.sh:ro
     restart: unless-stopped
     environment:

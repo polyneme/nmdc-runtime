@@ -34,9 +34,12 @@ update: update-deps init
 up-dev:
 	docker compose up --build --force-recreate --detach --remove-orphans
 
+pull-testdb:
+	python -c "from tests.test_api.test_endpoints import *; ensure_schema_collections_local_filesystem_cache()"
+
 dev-reset-db:
 	docker compose \
-		exec mongo /bin/bash -c "./app_tests/mongorestore-nmdc-testdb.sh"
+		exec mongo /bin/bash -c "/mongorestore-nmdc-testdb.sh"
 
 up-test:
 	docker compose --file docker-compose.test.yml \
@@ -45,7 +48,7 @@ up-test:
 test-build:
 	docker compose --file docker-compose.test.yml build test
 
-test-dbinit:
+test-reset-db:
 	docker compose --file docker-compose.test.yml \
 		exec mongo /bin/bash -c "/mongorestore-nmdc-testdb.sh"
 
