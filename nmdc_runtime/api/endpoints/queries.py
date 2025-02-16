@@ -273,9 +273,10 @@ def _run_query(query, mdb) -> CommandResponse:
     elif q_type is FindCommand:
         # TODO is `QueryRun` necessary? `CommandResponse` has `query_id` -- why not `ran_at` too?
         query_run_doc_slim = query_run.model_dump(exclude_unset=True)
-        query_run_doc_slim["cursor"]["firstBatch"] = [
+        print(query_run_doc_slim.keys())
+        query_run_doc_slim["result"]["cursor"]["firstBatch"] = [
             pick(["_id"], batch_doc)
-            for batch_doc in query_run_doc_slim["cursor"]["firstBatch"]
+            for batch_doc in query_run_doc_slim["result"]["cursor"]["firstBatch"]
         ]
         cursor_continuation = cc.create_cc(query_run_doc_slim)
     elif q_type is GetMoreCommandResponse:
