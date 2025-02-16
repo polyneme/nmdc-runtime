@@ -56,7 +56,11 @@ def check_can_update_and_delete(user: User):
         )
 
 
-@router.post("/queries:run", response_model=QueryResponseOptions)
+@router.post(
+    "/queries:run",
+    response_model=QueryResponseOptions,
+    response_model_exclude_unset=True,
+)
 def run_query(
     query_cmd: QueryCmd,
     mdb: MongoDatabase = Depends(get_mongo_db),
@@ -102,10 +106,14 @@ def run_query(
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
     cmd_response = _run_query(query, mdb)
-    return unmongo(cmd_response.model_dump(exclude_unset=True))
+    return unmongo(cmd_response.model_dump())
 
 
-@router.post("/queries/{query_id}:run", response_model=QueryResponseOptions)
+@router.post(
+    "/queries/{query_id}:run",
+    response_model=QueryResponseOptions,
+    response_model_exclude_unset=True,
+)
 def rerun_query(
     query_id: str,
     mdb: MongoDatabase = Depends(get_mongo_db),
@@ -116,7 +124,7 @@ def rerun_query(
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
     cmd_response = _run_query(query, mdb)
-    return unmongo(cmd_response.model_dump(exclude_unset=True))
+    return unmongo(cmd_response.model_dump())
 
 
 @router.get(
