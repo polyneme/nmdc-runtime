@@ -226,9 +226,25 @@ def _run_query(query, mdb) -> CommandResponse:
             query.cmd.sort.update({"_id": 1})
     elif q_type is GetMoreCommand:
         # Fetch cursor continuation for query, construct "getMore" equivalent, and assign `query` to that equivalent.
-        cursor_continuation = cc.get_cc_by_id(query.getMore)
+        cursor_continuation = cc.get_cc_by_id(query.cmd.getMore)
         # TODO construct "getMore" equivalent of originating "find" or "aggregate" query.
-        # TODO assign `query` to that equivalent.
+        initial_cmd_doc: dict = cc.initial_query_for_cc(cursor_continuation).model_dump(
+            exclude_unset=True
+        )["cmd"]
+        if "find" in initial_cmd_doc:
+            modified_cmd_doc = initial_cmd_doc.copy()
+            modified_cmd_doc["filter"] = modified_cmd_doc.get(
+                "filter", {}
+            )  # Ensure 'filter' dict
+            modified_cmd_doc["filter"].update(
+                {"_id": {"$gt": cc.last_doc__id_for_cc(cursor_continuation)}}
+            )
+            query.cmd = FindCommand(**modified_cmd_doc)
+            # TODO below is a first attempt to xform `{"$oid": "..."}` instances to `ObjectId("...")` instances.
+            query.cmd.filter = bson.json_util.loads(json.dumps(query.cmd.filter))
+        elif "aggregate" in initial_cmd_doc:
+            # TODO assign `query` cmd to equivalent aggregate cmd.
+            pass
 
     # Persist the query for reference and reuse.
     if mdb.queries.find_one({"id": query.id}) is None:
@@ -237,6 +253,10 @@ def _run_query(query, mdb) -> CommandResponse:
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
     q_response: dict = mdb.command(query.cmd.model_dump(exclude_unset=True))
     q_response.update({"query_id": query.id, "ran_at": ran_at})
+    if q_type is GetMoreCommand and "firstBatch" in q_response["cursor"]:
+        q_response["cursor"]["nextBatch"] = [
+            d for d in q_response["cursor"]["firstBatch"]
+        ]
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
 
     # Not okay? Early return.

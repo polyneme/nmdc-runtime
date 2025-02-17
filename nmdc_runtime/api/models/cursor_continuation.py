@@ -12,10 +12,10 @@ guarantees wrt a fixed "page size".
 """
 
 import datetime
-from typing import Union, List, Callable
+from typing import Union, List, Callable, Annotated
 
 from bson import ObjectId
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AfterValidator, field_validator
 from pymongo.database import Database as MongoDatabase
 
 from nmdc_runtime.api.core.idgen import generate_one_id
@@ -46,6 +46,10 @@ _mdb["_runtime.cursor_continuations"].create_index(
 _coll_cc = _mdb["_runtime.cursor_continuations"]
 
 
+def not_empty(lst: list) -> bool:
+    return len(lst) > 0
+
+
 class CursorContinuation(BaseModel):
     """Represents a sequence of query runs that "page" through a source query's results.
 
@@ -60,15 +64,32 @@ class CursorContinuation(BaseModel):
     id: str = Field(..., alias="_id")
     last_modified: datetime.datetime
 
+    @field_validator("cmd_responses", mode="after")
+    @classmethod
+    def not_empty(cls, value: list) -> list:
+        if len(value) == 0:
+            raise CursorContinuationError(
+                f"cursor continuation must refer to non-empty list of command responses"
+            )
+        return value
+
     @classmethod
     def from_initial_cmd_response(cls, cmd_response: CommandResponse):
         cc = CursorContinuation(
-            cmd_responses=[cmd_response],
+            cmd_responses=[cmd_response.model_dump(exclude_unset=True)],
             _id=generate_one_id(_mdb, "cursor_continuations"),
             last_modified=now(),
         )
         cc.cmd_responses[0].cursor.id = cc.id
         return cc
+
+
+class CursorContinuationError(Exception):
+    def __init__(self, detail: str):
+        self.detail = detail
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}: {self.detail})"
 
 
 def dump_cc(m: BaseModel):
@@ -82,10 +103,31 @@ def create_cc(cmd_response: CommandResponse) -> CursorContinuation:
     return cc
 
 
-def get_cc_by_id(cc_id: str):
+def get_cc_by_id(cc_id: str) -> CursorContinuation | None:
     doc = _coll_cc.find_one({"_id": cc_id})
-    if doc is not None:
-        return dump_cc(CursorContinuation(**doc))
+    if doc is None:
+        raise CursorContinuationError(f"cannot find cc with id {cc_id}")
+    return CursorContinuation(**doc)
+
+
+def initial_query_for_cc(cc: CursorContinuation):
+    qid = cc.cmd_responses[0].query_id
+    doc = _mdb.queries.find_one({"id": qid})
+    if doc is None:
+        raise CursorContinuationError(f"cannot find referenced query_id {qid}")
+    return Query(**doc)
+
+
+def last_doc__id_for_cc(cc: CursorContinuation):
+    last_cmd_response = cc.cmd_responses[-1]
+    if isinstance(last_cmd_response, FindOrAggregateCommandResponse):
+        return last_cmd_response.cursor.firstBatch[-1]["_id"]
+    elif isinstance(last_cmd_response, GetMoreCommandResponse):
+        return last_cmd_response.cursor.nextBatch[-1]["_id"]
+    else:
+        raise CursorContinuationError(
+            f"Unknown CursorResponse variant: {type(last_cmd_response)}"
+        )
 
 
 def get_more_with_cursor_continuation(cc_id: str):
