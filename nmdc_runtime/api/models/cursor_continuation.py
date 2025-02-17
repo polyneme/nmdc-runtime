@@ -25,15 +25,15 @@ from nmdc_runtime.api.models.query import (
     FindCommand,
     AggregateCommand,
     GetMoreCommand,
-    AggregateCommandResponse,
-    FindCommandResponse,
+    FindOrAggregateCommandResponse,
+    FindOrAggregateCommandResponse,
     GetMoreCommandResponse,
     InitialCommandResponseCursor,
     GetMoreCommandResponseCursor,
-    QueryRun,
     Query,
     CursorCommand,
     CursorResponse,
+    CommandResponse,
 )
 
 _mdb: MongoDatabase = get_mongo_db()
@@ -56,24 +56,30 @@ class CursorContinuation(BaseModel):
     for the `last_modified` field, assuming that `last_modified` is updated each time `query_runs` is extended.
     """
 
-    query_runs: List[QueryRun]
+    cmd_responses: List[CursorResponse]
     id: str = Field(..., alias="_id")
     last_modified: datetime.datetime
+
+    @classmethod
+    def from_initial_cmd_response(cls, cmd_response: CommandResponse):
+        cc = CursorContinuation(
+            cmd_responses=[cmd_response],
+            _id=generate_one_id(_mdb, "cursor_continuations"),
+            last_modified=now(),
+        )
+        cc.cmd_responses[0].cursor.id = cc.id
+        return cc
 
 
 def dump_cc(m: BaseModel):
     return m.model_dump(by_alias=True, exclude_unset=True)
 
 
-def create_cc(query_run: dict):
-    cc = CursorContinuation(
-        query_runs=[query_run],
-        _id=generate_one_id(_mdb, "cursor_continuations"),
-        last_modified=now(),
-    )
-    doc = dump_cc(cc)
-    _coll_cc.insert_one(doc)
-    return doc
+def create_cc(cmd_response: CommandResponse) -> CursorContinuation:
+    """Creates cursor continuation (CC) from initial command response and persists CC to database."""
+    cc = CursorContinuation.from_initial_cmd_response(cmd_response)
+    _coll_cc.insert_one(dump_cc(cc))
+    return cc
 
 
 def get_cc_by_id(cc_id: str):

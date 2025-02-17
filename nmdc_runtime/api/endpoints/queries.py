@@ -20,7 +20,6 @@ from nmdc_runtime.api.models.query import (
     Query,
     QueryResponseOptions,
     DeleteCommand,
-    QueryRun,
     CommandResponse,
     command_response_for,
     QueryCmd,
@@ -30,19 +29,13 @@ from nmdc_runtime.api.models.query import (
     AggregateCommand,
     FindCommand,
     GetMoreCommand,
-    AggregateCommandResponse,
-    FindCommandResponse,
+    FindOrAggregateCommandResponse,
     GetMoreCommandResponse,
 )
 from nmdc_runtime.api.models.user import get_current_active_user, User
 from nmdc_runtime.util import OverlayDB, validate_json
 
 router = APIRouter()
-
-
-def unmongo(d: dict) -> dict:
-    """Ensure a dict with e.g. mongo ObjectIds will serialize as JSON."""
-    return json.loads(bson.json_util.dumps(d))
 
 
 def check_can_update_and_delete(user: User):
@@ -106,7 +99,7 @@ def run_query(
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
     cmd_response = _run_query(query, mdb)
-    return unmongo(cmd_response.model_dump())
+    return cmd_response
 
 
 @router.post(
@@ -119,12 +112,11 @@ def rerun_query(
     mdb: MongoDatabase = Depends(get_mongo_db),
     user: User = Depends(get_current_active_user),
 ):
-
     query = Query(**raise404_if_none(mdb.queries.find_one({"id": query_id})))
     if isinstance(query.cmd, (DeleteCommand, UpdateCommand)):
         check_can_update_and_delete(user)
     cmd_response = _run_query(query, mdb)
-    return unmongo(cmd_response.model_dump())
+    return cmd_response
 
 
 @router.get(
@@ -243,8 +235,8 @@ def _run_query(query, mdb) -> CommandResponse:
         mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
 
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
-    q_response = mdb.command(query.cmd.model_dump(exclude_unset=True))
-    q_response["query_id"] = query.id
+    q_response: dict = mdb.command(query.cmd.model_dump(exclude_unset=True))
+    q_response.update({"query_id": query.id, "ran_at": ran_at})
     cmd_response: CommandResponse = command_response_for(q_type)(**q_response)
 
     # Not okay? Early return.
@@ -263,24 +255,17 @@ def _run_query(query, mdb) -> CommandResponse:
                 ),
             )
 
-    query_run = QueryRun(qid=query.id, ran_at=ran_at, result=cmd_response)
-
     # Cursor-command response? Prep runtime-managed cursor id and replace mongo session cursor id in response.
     cursor_continuation = None
     if q_type is AggregateCommand:
         # TODO
-        cursor_continuation = cc.create_cc(query_run.model_dump(exclude_unset=True))
+        cursor_continuation = cc.create_cc(cmd_response)
     elif q_type is FindCommand:
-        # TODO is `QueryRun` necessary? `CommandResponse` has `query_id` -- why not `ran_at` too?
-        query_run_doc_slim = query_run.model_dump(exclude_unset=True)
-        print(query_run_doc_slim.keys())
-        query_run_doc_slim["result"]["cursor"]["firstBatch"] = [
-            pick(["_id"], batch_doc)
-            for batch_doc in query_run_doc_slim["result"]["cursor"]["firstBatch"]
-        ]
-        cursor_continuation = cc.create_cc(query_run_doc_slim)
+        cursor_continuation = cc.create_cc(
+            FindOrAggregateCommandResponse.cursor_batch__ids_only(cmd_response)
+        )
+        cmd_response.cursor.id = cursor_continuation.id
     elif q_type is GetMoreCommandResponse:
         # TODO Append query run to current continuation
         pass
-    mdb.query_runs.insert_one(query_run.model_dump(exclude_unset=True))
     return cmd_response

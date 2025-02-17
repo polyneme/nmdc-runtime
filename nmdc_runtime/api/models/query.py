@@ -1,7 +1,9 @@
 import datetime
+import json
 from typing import Optional, Any, Dict, List, Union
 
-from bson import ObjectId
+import bson
+import bson.json_util
 from pydantic import (
     model_validator,
     Field,
@@ -10,16 +12,23 @@ from pydantic import (
     NonNegativeInt,
     field_validator,
     ConfigDict,
+    WrapSerializer,
 )
 from pymongo.database import Database as MongoDatabase
 from toolz import assoc
 from typing_extensions import Annotated
 
 from nmdc_runtime.api.core.idgen import generate_one_id
-from nmdc_runtime.api.core.util import now
+from nmdc_runtime.api.core.util import now, pick
 from nmdc_runtime.api.db.mongo import get_mongo_db
 
-Document = Dict[str, Any]
+
+def bson_to_json(doc: Any, handler) -> dict:
+    """Ensure a dict with e.g. mongo ObjectIds will serialize as JSON."""
+    return json.loads(bson.json_util.dumps(doc))
+
+
+Document = Annotated[Dict[str, Any], WrapSerializer(bson_to_json)]
 
 OneOrZero = Annotated[int, Field(ge=0, le=1)]
 One = Annotated[int, Field(ge=1, le=1)]
@@ -87,6 +96,7 @@ class GetMoreCommand(CommandBase):
 
 class CommandResponse(BaseModel):
     query_id: str
+    ran_at: datetime.datetime
     ok: OneOrZero
 
 
@@ -134,13 +144,17 @@ class GetMoreCommandResponse(CommandResponse):
     cursor: GetMoreCommandResponseCursor
 
 
-class FindCommandResponse(CommandResponse):
+class FindOrAggregateCommandResponse(CommandResponse):
     cursor: InitialCommandResponseCursor
 
-
-class AggregateCommandResponse(CommandResponse):
-    # model_config = ConfigDict(extra="allow")
-    cursor: InitialCommandResponseCursor
+    @classmethod
+    def cursor_batch__ids_only(cls, cmd_response) -> "FindOrAggregateCommandResponse":
+        """Create a new response object that retains only the `_id` for each cursor firstBatch document."""
+        doc: dict = cmd_response.model_dump(exclude_unset=True)
+        doc["cursor"]["firstBatch"] = [
+            pick(["_id"], batch_doc) for batch_doc in doc["cursor"]["firstBatch"]
+        ]
+        return cls(**doc)
 
 
 class DeleteStatement(BaseModel):
@@ -177,7 +191,7 @@ class UpdateCommand(CommandBase):
 
 class DocumentUpserted(BaseModel):
     index: NonNegativeInt
-    _id: ObjectId
+    _id: bson.ObjectId
 
 
 class UpdateCommandResponse(CommandResponse):
@@ -201,11 +215,10 @@ QueryCmd = Union[
 QueryResponseOptions = Union[
     CollStatsCommandResponse,
     CountCommandResponse,
-    FindCommandResponse,
+    FindOrAggregateCommandResponse,
     GetMoreCommandResponse,
     DeleteCommandResponse,
     UpdateCommandResponse,
-    AggregateCommandResponse,
 ]
 
 CursorCommand = Union[
@@ -215,8 +228,7 @@ CursorCommand = Union[
 ]
 
 CursorResponse = Union[
-    AggregateCommandResponse,
-    FindCommandResponse,
+    FindOrAggregateCommandResponse,
     GetMoreCommandResponse,
 ]
 
@@ -225,11 +237,11 @@ def command_response_for(type_):
     d = {
         CollStatsCommand: CollStatsCommandResponse,
         CountCommand: CountCommandResponse,
-        FindCommand: FindCommandResponse,
+        FindCommand: FindOrAggregateCommandResponse,
         GetMoreCommand: GetMoreCommandResponse,
         DeleteCommand: DeleteCommandResponse,
         UpdateCommand: UpdateCommandResponse,
-        AggregateCommand: AggregateCommandResponse,
+        AggregateCommand: FindOrAggregateCommandResponse,
     }
     return d.get(type_)
 
@@ -244,9 +256,3 @@ class Query(BaseModel):
     @classmethod
     def from_cmd(cls, cmd: QueryCmd) -> "Query":
         return Query(cmd=cmd, id=generate_one_id(_mdb, "qy"))
-
-
-class QueryRun(BaseModel):
-    qid: str
-    ran_at: datetime.datetime
-    result: Any
