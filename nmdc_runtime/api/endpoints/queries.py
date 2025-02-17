@@ -4,6 +4,7 @@ from typing import List
 import bson.json_util
 from fastapi import APIRouter, Depends, status, HTTPException
 from pymongo.database import Database as MongoDatabase
+from toolz import assoc_in
 
 from nmdc_runtime.api.core.idgen import generate_one_id
 from nmdc_runtime.api.core.util import now, raise404_if_none, pick
@@ -132,6 +133,8 @@ def get_query(
 def _run_query(query, mdb) -> CommandResponse:
     q_type = type(query.cmd)
     ran_at = now()
+    cursor_id = None if q_type is not GetMoreCommand else query.cmd.getMore
+
     if q_type is DeleteCommand:
         collection_name = query.cmd.delete
         if collection_name not in get_nonempty_nmdc_schema_collection_names(mdb):
@@ -226,22 +229,18 @@ def _run_query(query, mdb) -> CommandResponse:
             query.cmd.sort.update({"_id": 1})
     elif q_type is GetMoreCommand:
         # Fetch cursor continuation for query, construct "getMore" equivalent, and assign `query` to that equivalent.
-        cursor_continuation = cc.get_cc_by_id(query.cmd.getMore)
-        # TODO construct "getMore" equivalent of originating "find" or "aggregate" query.
+        cursor_continuation = cc.get_cc_by_id(cursor_id)
+        # construct "getMore" equivalent of originating "find" or "aggregate" query.
         initial_cmd_doc: dict = cc.initial_query_for_cc(cursor_continuation).model_dump(
             exclude_unset=True
         )["cmd"]
         if "find" in initial_cmd_doc:
-            modified_cmd_doc = initial_cmd_doc.copy()
-            modified_cmd_doc["filter"] = modified_cmd_doc.get(
-                "filter", {}
-            )  # Ensure 'filter' dict
-            modified_cmd_doc["filter"].update(
-                {"_id": {"$gt": cc.last_doc__id_for_cc(cursor_continuation)}}
+            modified_cmd_doc = assoc_in(
+                initial_cmd_doc,
+                ["filter", "_id", "$gt"],
+                cc.last_doc__id_for_cc(cursor_continuation),
             )
             query.cmd = FindCommand(**modified_cmd_doc)
-            # TODO below is a first attempt to xform `{"$oid": "..."}` instances to `ObjectId("...")` instances.
-            query.cmd.filter = bson.json_util.loads(json.dumps(query.cmd.filter))
         elif "aggregate" in initial_cmd_doc:
             # TODO assign `query` cmd to equivalent aggregate cmd.
             pass
@@ -251,7 +250,10 @@ def _run_query(query, mdb) -> CommandResponse:
         mdb.queries.insert_one(query.model_dump(mode="json", exclude_unset=True))
 
     # Issue the (possibly modified) query as a mongo command, and ensure a well-formed response.
-    q_response: dict = mdb.command(query.cmd.model_dump(exclude_unset=True))
+    #  transform e.g. `{"$oid": "..."}` instances in model_dump to `ObjectId("...")` instances.
+    q_response: dict = mdb.command(
+        bson.json_util.loads(json.dumps(query.cmd.model_dump(exclude_unset=True)))
+    )
     q_response.update({"query_id": query.id, "ran_at": ran_at})
     if q_type is GetMoreCommand and "firstBatch" in q_response["cursor"]:
         q_response["cursor"]["nextBatch"] = [
@@ -284,8 +286,17 @@ def _run_query(query, mdb) -> CommandResponse:
         cursor_continuation = cc.create_cc(
             FindOrAggregateCommandResponse.cursor_batch__ids_only(cmd_response)
         )
-        cmd_response.cursor.id = cursor_continuation.id
-    elif q_type is GetMoreCommandResponse:
-        # TODO Append query run to current continuation
-        pass
+        cmd_response.cursor.id = (
+            None if cmd_response.cursor.id == "0" else cursor_continuation.id
+        )
+    elif q_type is GetMoreCommand:
+        # Append query run to current continuation
+        cursor_continuation = cc.get_cc_by_id(cursor_id)
+        cursor_continuation.cmd_responses.append(
+            FindOrAggregateCommandResponse.cursor_batch__ids_only(cmd_response)
+        )
+        cmd_response.cursor.id = (
+            None if cmd_response.cursor.id == "0" else cursor_continuation.id
+        )
+        print(f"getmore:{cmd_response.cursor.id=}")
     return cmd_response

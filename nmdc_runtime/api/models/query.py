@@ -149,11 +149,15 @@ class FindOrAggregateCommandResponse(CommandResponse):
 
     @classmethod
     def cursor_batch__ids_only(cls, cmd_response) -> "FindOrAggregateCommandResponse":
-        """Create a new response object that retains only the `_id` for each cursor firstBatch document."""
+        """Create a new response object that retains only the `_id` for each cursor firstBatch|nextBatch document."""
         doc: dict = cmd_response.model_dump(exclude_unset=True)
+        # FIXME
+        batch_key = "firstBatch" if "firstBatch" in doc["cursor"] else "nextBatch"
         doc["cursor"]["firstBatch"] = [
-            pick(["_id"], batch_doc) for batch_doc in doc["cursor"]["firstBatch"]
+            pick(["_id"], batch_doc) for batch_doc in doc["cursor"][batch_key]
         ]
+        if batch_key == "nextBatch":
+            del doc["cursor"]["nextBatch"]
         return cls(**doc)
 
 
