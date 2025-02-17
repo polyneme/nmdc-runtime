@@ -5,7 +5,7 @@ init:
 
 # Updates Python dependencies based upon the contents of the `requirements/main.in` and `requirements/dev.in` files.
 #
-# Note: To omit the `--upgrade` option (included by default) when running `pip-compile`:
+# Note: To omit the `--upgrade` option (included by default) from the constituent `pip-compile` commands:
 #       ```
 #       $ make update-deps UPDATE_DEPS_MAIN_UPGRADE_OPT='' UPDATE_DEPS_DEV_UPGRADE_OPT=''
 #       ```
@@ -13,6 +13,10 @@ init:
 # Note: You can run the following command on your host machine to have `$ make update-deps` run within a container:
 #       ```sh
 #       $ docker compose run --rm --no-deps fastapi sh -c 'make update-deps'
+#       ```
+#       To omit the `--upgrade` option (included by default) from the constituent `pip-compile` commands:
+#       ```sh
+#       $ docker compose run --rm --no-deps fastapi sh -c 'make update-deps UPDATE_DEPS_MAIN_UPGRADE_OPT="" UPDATE_DEPS_DEV_UPGRADE_OPT=""'
 #       ```
 #
 UPDATE_DEPS_MAIN_UPGRADE_OPT ?= --upgrade

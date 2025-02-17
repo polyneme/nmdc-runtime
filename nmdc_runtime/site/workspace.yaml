@@ -13,6 +13,9 @@ load_from:
       attribute: biosample_submission_ingest
   - python_package:
       package_name: nmdc_runtime.site.repository
+      attribute: biosample_export
+  - python_package:
+      package_name: nmdc_runtime.site.repository
       attribute: database_records_stitching
 #  - python_package:
 #      package_name: nmdc_runtime.site.repository

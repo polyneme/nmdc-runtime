@@ -40,4 +40,4 @@ ENV PYTHONFAULTHANDLER=1
 
 # uncomment line below to stop after first test failure:
 # https://docs.pytest.org/en/6.2.x/usage.html#stopping-after-the-first-or-n-failures
-ENTRYPOINT [ "./wait-for-it.sh", "fastapi:8000" , "--strict" , "--timeout=300" , "--" , "pytest"]
+ENTRYPOINT [ "./wait-for-it.sh", "fastapi:8000" , "--strict" , "--timeout=300" , "--" , "pytest", "--cov=nmdc_runtime"]
