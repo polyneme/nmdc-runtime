@@ -137,6 +137,8 @@ def list_resources(req: ListRequest, mdb: MongoDatabase, collection_name: str):
         )
         last_id = resources[-1][id_field]
         token = generate_one_id(mdb, "page_tokens")
+        # TODO unify with `/queries:run` cursor continuation model
+        #  => {_id: cursor/token, query: <full query>, last_id: <>, last_modified: <>}
         mdb.page_tokens.insert_one(
             {"_id": token, "ns": collection_name, "last_id": last_id}
         )
